@@ -14,12 +14,38 @@ import (
 
 const (
 	defaultCredentialFile = "~/.git-credentials"
+	defaultLogFile        = "~/.cache/git-credential-readonly.log"
 )
 
 func main() {
 	var credFile string
+	var logFile string
+	var debug bool
+
 	flag.StringVar(&credFile, "file", defaultCredentialFile, "use given file instead of the default credential file")
+	flag.StringVar(&logFile, "log", defaultLogFile, "log file path, used only when debug mode is enabled")
+	flag.BoolVar(&debug, "debug", false, "enable debug mode and write log to "+defaultLogFile)
 	flag.Parse()
+
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	if debug {
+		var err error
+		logFile, err = expandHomeDir(logFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		logOut, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModePerm)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.SetOutput(logOut)
+	} else {
+		log.SetOutput(io.Discard)
+	}
+
+	log.Printf("helper begin |--------------------------------->")
+	defer log.Printf("helper end <---------------------------------|")
 
 	args := flag.Args()
 	if len(args) < 1 {
@@ -29,16 +55,17 @@ func main() {
 
 	switch action {
 	case "get":
-
 		req, err := parseGitCredentials(os.Stdin)
 		if err != nil {
 			log.Fatalf("get stdin failed, err=%v", err)
 		}
+		log.Printf("get req success: %#v", req)
 		credential := getCredential(req, credFile)
 		if credential == nil {
 			// credential not found
 			os.Exit(1)
 		}
+		log.Printf("get credential success: %#v", credential)
 		fmt.Printf("username=%s\npassword=%s\n", credential.username, credential.password)
 	case "erase", "store":
 		// noop
@@ -59,13 +86,20 @@ func (c *credential) match(other *credential) bool {
 	if c == nil || other == nil {
 		return false
 	}
-	match := c.protocol == other.protocol &&
-		c.username == other.username &&
-		c.host == other.host
-	if other.path == "" {
-		return match
+	match := c.host == other.host
+
+	if other.protocol != "" {
+		match = match && c.protocol == other.protocol
 	}
-	return match && c.path == other.path
+
+	if other.username != "" {
+		match = match && c.username == other.username
+	}
+
+	if other.path != "" {
+		match = match && c.path == other.path
+	}
+	return match
 }
 
 func parseGitCredentials(r io.Reader) (*credential, error) {
@@ -137,12 +171,16 @@ func parseCredential(line string) *credential {
 
 	hostAndPath := fields[1]
 	hostFields := strings.SplitN(hostAndPath, "/", 2)
-	if len(hostFields) != 2 {
+	if len(hostFields) != 1 && len(hostFields) != 2 {
 		// malformed line, ignore
 		return nil
 	}
 	host := hostFields[0]
-	path := hostFields[1]
+
+	var path string
+	if len(hostFields) == 2 {
+		path = hostFields[1]
+	}
 
 	return &credential{
 		protocol: proto,
@@ -171,6 +209,7 @@ func getCredential(req *credential, credFile string) *credential {
 		line := scanner.Text()
 		cred := parseCredential(line)
 		if cred == nil {
+			log.Printf("err malformed credential line: %s", line)
 			continue
 		}
 		if cred.match(req) {
