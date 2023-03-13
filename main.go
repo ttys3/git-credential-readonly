@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/user"
@@ -27,10 +29,12 @@ func main() {
 
 	switch action {
 	case "get":
-		if len(args) < 2 {
-			log.Fatal("no URL specified")
+
+		req, err := parseGitCredentials(os.Stdin)
+		if err != nil {
+			log.Fatalf("get stdin failed, err=%v", err)
 		}
-		credential := getCredential(args[1], credFile)
+		credential := getCredential(req, credFile)
 		if credential == nil {
 			// credential not found
 			os.Exit(1)
@@ -52,10 +56,59 @@ type credential struct {
 }
 
 func (c *credential) match(other *credential) bool {
-	return c.protocol == other.protocol &&
+	if c == nil || other == nil {
+		return false
+	}
+	match := c.protocol == other.protocol &&
 		c.username == other.username &&
-		c.host == other.host &&
-		c.path == other.path
+		c.host == other.host
+	if other.path == "" {
+		return match
+	}
+	return match && c.path == other.path
+}
+
+func parseGitCredentials(r io.Reader) (*credential, error) {
+	rd := bufio.NewReader(r)
+	c := &credential{}
+	for {
+		key, err := rd.ReadString('=')
+		if err != nil {
+			if err == io.EOF {
+				if key == "" {
+					return c, nil
+				}
+
+				return nil, io.ErrUnexpectedEOF
+			}
+
+			return nil, err
+		}
+
+		key = strings.TrimSuffix(key, "=")
+		val, err := rd.ReadString('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = io.ErrUnexpectedEOF
+			}
+
+			return nil, err
+		}
+
+		val = strings.TrimSuffix(val, "\n")
+		switch key {
+		case "protocol":
+			c.protocol = val
+		case "host":
+			c.host = val
+		case "path":
+			c.path = val
+		case "username":
+			c.username = val
+		case "password":
+			c.password = val
+		}
+	}
 }
 
 func parseCredential(line string) *credential {
@@ -100,7 +153,7 @@ func parseCredential(line string) *credential {
 	}
 }
 
-func getCredential(url, credFile string) *credential {
+func getCredential(req *credential, credFile string) *credential {
 	credPath, err := expandHomeDir(credFile)
 	if err != nil {
 		log.Fatal(err)
@@ -120,7 +173,7 @@ func getCredential(url, credFile string) *credential {
 		if cred == nil {
 			continue
 		}
-		if cred.protocol == "https" && cred.match(parseCredential(fmt.Sprintf("https://%s", url))) {
+		if cred.match(req) {
 			return cred
 		}
 	}

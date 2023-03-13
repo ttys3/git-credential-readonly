@@ -17,16 +17,15 @@ func TestGetCredential(t *testing.T) {
 
 	// write some credentials to the file
 	creds := []string{
-		"https://github.com/foo/bar:john:password@github.com/path/to/repo.git",
-		"https://github.com/foo/bar:jane:password@github.com/path/to/repo.git",
-		"https://gitlab.com/foo/bar:john:password@gitlab.com/path/to/repo.git",
+		"https://john:password@github.com/foo/bar",
+		"https://jane:password@bitbucket.org/foo/bar.git",
 	}
 	for _, cred := range creds {
 		fmt.Fprintln(credFile, cred)
 	}
 
 	// test getting a credential that exists in the file
-	c := getCredential("github.com/foo/bar", credFile.Name())
+	c := getCredential(&credential{username: "john", protocol: "https", host: "github.com", path: "foo/bar"}, credFile.Name())
 	if c == nil {
 		t.Errorf("expected to find a credential for github.com/foo/bar")
 	}
@@ -35,7 +34,7 @@ func TestGetCredential(t *testing.T) {
 	}
 
 	// test getting a credential that does not exist in the file
-	c = getCredential("bitbucket.org/foo/bar", credFile.Name())
+	c = getCredential(&credential{username: "john", protocol: "https", host: "bitbucket.org", path: "foo/bar"}, credFile.Name())
 	if c != nil {
 		t.Errorf("expected to not find a credential for bitbucket.org/foo/bar")
 	}
