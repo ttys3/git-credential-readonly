@@ -45,7 +45,7 @@ func main() {
 	}
 
 	log.Printf("helper begin |--------------------------------->")
-	defer log.Printf("helper end <---------------------------------|")
+	defer log.Printf("helper end <---------------------------------|\n")
 
 	args := flag.Args()
 	if len(args) < 1 {
