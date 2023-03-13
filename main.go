@@ -55,7 +55,7 @@ func main() {
 
 	switch action {
 	case "get":
-		req, err := parseGitCredentials(os.Stdin)
+		req, err := parseGitCredentialRequest(os.Stdin)
 		if err != nil {
 			log.Fatalf("get stdin failed, err=%v", err)
 		}
@@ -102,7 +102,7 @@ func (c *credential) match(other *credential) bool {
 	return match
 }
 
-func parseGitCredentials(r io.Reader) (*credential, error) {
+func parseGitCredentialRequest(r io.Reader) (*credential, error) {
 	rd := bufio.NewReader(r)
 	c := &credential{}
 	for {
