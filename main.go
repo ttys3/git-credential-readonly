@@ -55,6 +55,7 @@ func main() {
 
 	switch action {
 	case "get":
+		log.Printf("begin handle action=%v", action)
 		req, err := parseGitCredentialRequest(os.Stdin)
 		if err != nil {
 			log.Fatalf("get stdin failed, err=%v", err)
@@ -68,9 +69,10 @@ func main() {
 		log.Printf("get credential success: %#v", credential)
 		fmt.Printf("username=%s\npassword=%s\n", credential.username, credential.password)
 	case "erase", "store":
+		log.Printf("ignore action=%v", action)
 		// noop
 	default:
-		log.Fatalf("unsupported action: %s", action)
+		log.Fatalf("unsupported action=%s", action)
 	}
 }
 
