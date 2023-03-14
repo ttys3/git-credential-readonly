@@ -18,8 +18,8 @@ for example:
 	helper = readonly
 ```
 
-if you use `store` instead of `readonly`, it will always write back to the credential store file, 
-which will cause problem after you use organization token, 
+if you use `store` instead of `readonly`, it will always write back to the credential store file,
+which will cause problem after you use organization token,
 it will write the organization token back to the user credential store file.
 so you personal token (by default in `~/.git-credentials`) will be overwritten by the organization token.
 due to both auth host name are the same.
@@ -32,10 +32,45 @@ go install github.com/ttys3/git-credential-readonly@latest
 
 ```shell
 usage: `git-credential-readonly <get|store|erase>`
+```
 
 ```shell
 git config --global credential.helper readonly
 ```
+## how to use with same host with diff token?
+
+the credential.helper config sequence is important, git will match against it until it get the matched credentials.
+
+so organization specific token should goes first.
+
+```ini
+# organization specific token
+[credential "https://github.com/your-org/"]
+	helper = readonly --file ~/.git-credentials-org
+
+# general personal token
+[credential]
+	helper = readonly
+
+[url "https://github.com/"]
+	insteadOf = git@github.com:
+```
+
+the credential files:
+
+`~/.git-credentials-org`:
+
+```
+https://username:org-token@github.com
+```
+
+`~/.git-credentials`:
+
+```
+https://username:personal-token@github.com
+```
+
+
 ## docs
 
 https://git-scm.com/book/en/v2/Git-Tools-Credential-Storage
