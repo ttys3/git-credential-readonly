@@ -73,4 +73,4 @@ https://username:personal-token@github.com
 
 ## docs
 
-https://git-scm.com/book/en/v2/Git-Tools-Credential-Storage
+https://git-scm.com/book/en/v2/Git-Tools-Credential-Storage#_a_custom_credential_cache
