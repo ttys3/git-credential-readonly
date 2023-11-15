@@ -74,6 +74,29 @@ https://username:org-token@github.com
 https://username:personal-token@github.com
 ```
 
+you can also use personal and org tokens in one file:
+
+the config:
+
+```ini
+# organization specific token
+[credential "https://github.com/your-org/"]
+	helper = readonly --file ~/.git-credentials-org
+	# https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-useHttpPath
+	# uncomment below if you need match path by username or org name
+	# for example: repo path `foo/bar.git`, will match path by `foo`
+	useHttpPath = true
+```
+
+the credential files:
+
+`~/.git-credentials-org`:
+
+```
+https://username:personal-token@github.com/username
+https://username:personal-token-for-org1@github.com/org-foo
+https://username:personal-token-for-org2@github.com/org-bar
+```
 
 ## docs
 
