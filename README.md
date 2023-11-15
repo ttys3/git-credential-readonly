@@ -79,8 +79,8 @@ you can also use personal and org tokens in one file:
 the config:
 
 ```ini
-# organization specific token
-[credential "https://github.com/your-org/"]
+# github specific token
+[credential "https://github.com/"]
 	helper = readonly --file ~/.git-credentials-org
 	# https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-useHttpPath
 	# uncomment below if you need match path by username or org name
