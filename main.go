@@ -84,35 +84,47 @@ type credential struct {
 	path     string
 }
 
-func (c *credential) match(other *credential) bool {
-	if c == nil || other == nil {
+func (c *credential) match(req *credential) bool {
+	if c == nil || req == nil {
 		return false
 	}
-	match := c.host == other.host
+	match := c.host == req.host
 
-	if other.protocol != "" {
-		match = match && c.protocol == other.protocol
+	if req.protocol != "" {
+		match = match && c.protocol == req.protocol
 	}
 
-	if other.username != "" {
-		match = match && c.username == other.username
+	if req.username != "" {
+		match = match && c.username == req.username
 	}
 
-	if other.path != "" {
-		match = match && c.path == other.path
+	if req.path != "" {
+		// get username or org from repo path like `username-or-org/reponame.git`
+		reqOrg, _, hasSep := strings.Cut(req.path, "/")
+		if hasSep && reqOrg != "" {
+			matchReqPath := strings.TrimRight(reqOrg, "/")
+			matchConfigPath := strings.TrimRight(c.path, "/")
+			match = match && matchReqPath == matchConfigPath
+			log.Printf("match path by username or org: req.path=%v,config.path=%v,result=%v",
+				matchReqPath, matchConfigPath, match)
+		} else {
+			match = match && c.path == req.path
+			log.Printf("match path: req.path=%v,other.path=%v,result=%v",
+				c.path, req.path, match)
+		}
 	}
 	return match
 }
 
 func parseGitCredentialRequest(r io.Reader) (*credential, error) {
 	rd := bufio.NewReader(r)
-	c := &credential{}
+	req := &credential{}
 	for {
 		key, err := rd.ReadString('=')
 		if err != nil {
 			if err == io.EOF {
 				if key == "" {
-					return c, nil
+					return req, nil
 				}
 
 				return nil, io.ErrUnexpectedEOF
@@ -134,15 +146,15 @@ func parseGitCredentialRequest(r io.Reader) (*credential, error) {
 		val = strings.TrimSuffix(val, "\n")
 		switch key {
 		case "protocol":
-			c.protocol = val
+			req.protocol = val
 		case "host":
-			c.host = val
+			req.host = val
 		case "path":
-			c.path = val
+			req.path = val
 		case "username":
-			c.username = val
+			req.username = val
 		case "password":
-			c.password = val
+			req.password = val
 		}
 	}
 }

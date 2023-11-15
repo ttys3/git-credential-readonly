@@ -47,6 +47,10 @@ so organization specific token should goes first.
 # organization specific token
 [credential "https://github.com/your-org/"]
 	helper = readonly --file ~/.git-credentials-org
+	# https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-useHttpPath
+	# uncomment below if you need match path by username or org name
+	# for example: repo path `foo/bar.git`, will match path by `foo`
+	#useHttpPath = true
 
 # general personal token
 [credential]
