@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"strings"
+	"net/url"
 )
 
 const (
@@ -180,20 +181,32 @@ func parseCredential(line string) *credential {
 		// malformed line, ignore
 		return nil
 	}
-	username := credFields[0]
-	password := credFields[1]
-
+	username,err := url.QueryUnescape(credFields[0])
+    	if err != nil {
+        	return nil
+	}
+	password,err := url.QueryUnescape(credFields[1])
+    	if err != nil {
+        	return nil
+	}
+	
 	hostAndPath := fields[1]
 	hostFields := strings.SplitN(hostAndPath, "/", 2)
 	if len(hostFields) != 1 && len(hostFields) != 2 {
 		// malformed line, ignore
 		return nil
 	}
-	host := hostFields[0]
-
+	host,err := url.QueryUnescape(hostFields[0])
+	if err != nil {
+        	return nil
+	}
+	
 	var path string
 	if len(hostFields) == 2 {
-		path = hostFields[1]
+		path,err = url.QueryUnescape(hostFields[1])
+		if err != nil {
+        		return nil
+		}
 	}
 
 	return &credential{
