@@ -1,0 +1,26 @@
+# Example only: copy the relevant sections into ~/.gitconfig.
+# The private host, account names, and credential file names are placeholders.
+
+# Reset helpers inherited from lower-priority config files, such as
+# osxkeychain, manager, or libsecret. This reset must appear before every
+# helper that should remain active.
+[credential]
+	helper =
+
+# Select GitHub credentials by the first path component (account or
+# organization). See the matching credential-file entries in README.md.
+[credential "https://github.com/"]
+	helper = readonly --file ~/.git-credentials-work
+	useHttpPath = true
+
+# Optional second HTTPS Git host with credentials in the same work file.
+[credential "https://git.example.com/"]
+	helper = readonly --file ~/.git-credentials-work
+
+# General personal credential fallback. Keep this after scoped helpers.
+[credential]
+	helper = readonly
+
+# Optional: rewrite GitHub's SSH-style remote URLs to HTTPS.
+[url "https://github.com/"]
+	insteadOf = git@github.com:

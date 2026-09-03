@@ -1,116 +1,162 @@
 # git-credential-readonly
 
-this is a git credential helper that only reads from the credential store, and never writes to it.
+`git-credential-readonly` is a read-only replacement for
+`git-credential-store`. It handles the `get` action and intentionally ignores
+`store` and `erase`, so Git can retrieve credentials without modifying the
+credential files.
 
-in a word, it is a drop-in replacement for `git-credential-store` that only handle `get` action, and silently ignore `store` and `erase`.
+This is useful when personal and organization tokens for the same host live in
+different files. Git sends approved credentials to every configured helper;
+using `store` for both files can therefore copy an organization token into the
+personal credential file.
 
-it exists because the git built-in credential helper `store` will always write back to the credential store file.
-
-which will cause problem when you have different store config for both user personal token and organization personal token.
-
-for example:
+For example:
 
 ```ini
 [credential "https://github.com/org-name/"]
-	helper = readonly --file ~/.git-credentials-org
+	helper = readonly --file ~/.git-credentials-work
 
 [credential]
 	helper = readonly
 ```
 
-if you use `store` instead of `readonly`, it will always write back to the credential store file,
-which will cause problem after you use organization token,
-it will write the organization token back to the user credential store file.
-so you personal token (by default in `~/.git-credentials`) will be overwritten by the organization token.
-due to both auth host name are the same.
+With `readonly`, the organization token can be read from its dedicated file
+without being written to the personal store at `~/.git-credentials`.
 
-## install
+## Installation
 
 ```shell
 go install github.com/ttys3/git-credential-readonly@latest
 ```
 
-```shell
-usage: `git-credential-readonly <get|store|erase>`
+The helper supports these actions:
+
+```text
+git-credential-readonly <get|store|erase>
 ```
+
+For a single default credential file, configure it as follows:
 
 ```shell
 git config --global credential.helper readonly
 ```
-## how to use with same host with diff token?
 
-the credential.helper config sequence is important, git will match against it until it get the matched credentials.
+## Multiple credentials and inherited helpers
 
-so organization specific token should goes first.
+The order of `credential.helper` entries is significant. Git tries helpers in
+order until it has both a username and a password. An empty helper value has a
+special meaning: it clears every helper collected before it.
 
-If a system-level config already defines a helper (for example,
-`osxkeychain` on macOS), reset the inherited helper list before adding scoped
-and fallback helpers. An empty `helper` resets every helper seen before it, so
-its position is significant.
+This commonly affects users whose system Git configuration already selects a
+helper such as:
+
+- `osxkeychain` on macOS;
+- `manager` or `manager-core` from Git Credential Manager;
+- `libsecret` on Linux.
+
+The following ordering is incorrect:
 
 ```ini
-# reset inherited helpers before adding the ordered helper list
+[credential "https://github.com/"]
+	helper = readonly --file ~/.git-credentials-work
+
+[credential]
+	helper =
+	helper = readonly
+```
+
+The empty value clears both the inherited system helper and the GitHub-specific
+helper. Git then runs only `git credential-readonly get`, which reads the
+default `~/.git-credentials` file and may fall back to prompting for a username.
+
+The required order is:
+
+1. reset inherited helpers;
+2. add host- or organization-specific helpers;
+3. add the general fallback helper last.
+
+See the complete, sanitized [`examples/gitconfig`](examples/gitconfig) file:
+
+```ini
 [credential]
 	helper =
 
-# organization specific token
-[credential "https://github.com/your-org/"]
-	helper = readonly --file ~/.git-credentials-org
-	# https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-useHttpPath
-	# uncomment below if you need match path by username or org name
-	# for example: repo path `foo/bar.git`, will match path by `foo`
-	#useHttpPath = true
+[credential "https://github.com/"]
+	helper = readonly --file ~/.git-credentials-work
+	useHttpPath = true
 
-# general personal token
+[credential "https://git.example.com/"]
+	helper = readonly --file ~/.git-credentials-work
+
 [credential]
 	helper = readonly
-
-[url "https://github.com/"]
-	insteadOf = git@github.com:
 ```
 
-the credential files:
+Copy the relevant sections into `~/.gitconfig` and replace the example host and
+file names as needed.
 
-`~/.git-credentials-org`:
+### Credential file examples
 
+When `useHttpPath = true`, include a GitHub account or organization path in
+each credential URL. An owner-only entry matches every repository belonging to
+that owner, while a full repository path matches only that repository.
+
+`~/.git-credentials-work`:
+
+```text
+https://example-user:organization-token@github.com/example-org
+https://example-user:repository-token@github.com/example-org/private-repository.git
+https://example-user:work-token@git.example.com
 ```
-https://username:org-token@github.com
-```
+
+The default personal file may contain:
 
 `~/.git-credentials`:
 
-```
-https://username:personal-token@github.com
-```
-
-you can also use personal and org tokens in one file:
-
-the config:
-
-```ini
-# reset inherited helpers before adding the GitHub-specific helper
-[credential]
-	helper =
-
-# github specific token
-[credential "https://github.com/"]
-	helper = readonly --file ~/.git-credentials-org
-	# https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-useHttpPath
-	# uncomment below if you need match path by username or org name
-	# for example: repo path `foo/bar.git`, will match path by `foo`
-	useHttpPath = true
+```text
+https://example-user:personal-token@github.com/example-user
 ```
 
-the credential files:
+Credential files contain plaintext secrets. Never commit them, percent-encode
+special characters in usernames and tokens, and restrict their permissions:
 
-`~/.git-credentials-org`:
-
-```
-https://username:personal-token@github.com/username
-https://username:personal-token-for-org1@github.com/org-foo
-https://username:personal-token-for-org2@github.com/org-bar
+```shell
+chmod 600 ~/.git-credentials ~/.git-credentials-work
 ```
 
-## docs
+### Troubleshooting
 
-https://git-scm.com/book/en/v2/Git-Tools-Credential-Storage#_a_custom_credential_cache
+To see which helper Git actually executes without allowing an interactive
+prompt, run:
+
+```shell
+GIT_TRACE=1 GIT_TERMINAL_PROMPT=0 \
+git ls-remote --symref origin HEAD
+```
+
+For the example configuration, the trace should include:
+
+```text
+git credential-readonly --file ~/.git-credentials-work get
+```
+
+If it includes only the following command, check the ordering of the empty
+helper and the URL pattern used by the scoped helper:
+
+```text
+git credential-readonly get
+```
+
+You can inspect where generic and GitHub-specific settings came from with:
+
+```shell
+git config --show-origin --show-scope --get-all credential.helper
+git config --show-origin --show-scope \
+  --get-all credential.https://github.com/.helper
+```
+
+## Documentation
+
+- [Git credential storage](https://git-scm.com/book/en/v2/Git-Tools-Credential-Storage#_a_custom_credential_cache)
+- [`credential.helper` configuration](https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-credentialhelper)
+- [`credential.useHttpPath` configuration](https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-credentialuseHttpPath)
