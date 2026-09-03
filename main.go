@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"os/user"
 	"strings"
-	"net/url"
 )
 
 const (
@@ -100,51 +100,42 @@ func (c *credential) match(req *credential) bool {
 	}
 
 	if req.path != "" {
-		// get username or org from repo path like `username-or-org/reponame.git`
-		reqOrg, _, hasSep := strings.Cut(req.path, "/")
-		if hasSep && reqOrg != "" {
-			matchReqPath := strings.TrimRight(reqOrg, "/")
-			matchConfigPath := strings.TrimRight(c.path, "/")
-			match = match && matchReqPath == matchConfigPath
-			log.Printf("match path by username or org: req.path=%v,config.path=%v,result=%v",
-				matchReqPath, matchConfigPath, match)
-		} else {
-			match = match && c.path == req.path
-			log.Printf("match path: req.path=%v,other.path=%v,result=%v",
-				c.path, req.path, match)
-		}
+		pathMatch := matchCredentialPath(c.path, req.path)
+		match = match && pathMatch
+		log.Printf("match path: req.path=%v,config.path=%v,result=%v",
+			req.path, c.path, match)
 	}
 	return match
 }
 
+func matchCredentialPath(configPath, requestPath string) bool {
+	configPath = strings.TrimRight(configPath, "/")
+	requestPath = strings.TrimRight(requestPath, "/")
+
+	// Preserve the standard credential-store behavior for repository-specific
+	// entries before trying the owner/organization shorthand supported here.
+	if configPath == requestPath {
+		return true
+	}
+
+	requestOwner, _, hasSeparator := strings.Cut(requestPath, "/")
+	return hasSeparator && requestOwner != "" && configPath == requestOwner
+}
+
 func parseGitCredentialRequest(r io.Reader) (*credential, error) {
-	rd := bufio.NewReader(r)
+	scanner := bufio.NewScanner(r)
 	req := &credential{}
-	for {
-		key, err := rd.ReadString('=')
-		if err != nil {
-			if err == io.EOF {
-				if key == "" {
-					return req, nil
-				}
-
-				return nil, io.ErrUnexpectedEOF
-			}
-
-			return nil, err
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			break
 		}
 
-		key = strings.TrimSuffix(key, "=")
-		val, err := rd.ReadString('\n')
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				err = io.ErrUnexpectedEOF
-			}
-
-			return nil, err
+		key, val, found := strings.Cut(line, "=")
+		if !found {
+			return nil, errors.New("malformed credential attribute")
 		}
 
-		val = strings.TrimSuffix(val, "\n")
 		switch key {
 		case "protocol":
 			req.protocol = val
@@ -158,6 +149,11 @@ func parseGitCredentialRequest(r io.Reader) (*credential, error) {
 			req.password = val
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 func parseCredential(line string) *credential {
@@ -181,31 +177,31 @@ func parseCredential(line string) *credential {
 		// malformed line, ignore
 		return nil
 	}
-	username,err := url.QueryUnescape(credFields[0])
-    	if err != nil {
-        	return nil
+	username, err := url.QueryUnescape(credFields[0])
+	if err != nil {
+		return nil
 	}
-	password,err := url.QueryUnescape(credFields[1])
-    	if err != nil {
-        	return nil
+	password, err := url.QueryUnescape(credFields[1])
+	if err != nil {
+		return nil
 	}
-	
+
 	hostAndPath := fields[1]
 	hostFields := strings.SplitN(hostAndPath, "/", 2)
 	if len(hostFields) != 1 && len(hostFields) != 2 {
 		// malformed line, ignore
 		return nil
 	}
-	host,err := url.QueryUnescape(hostFields[0])
+	host, err := url.QueryUnescape(hostFields[0])
 	if err != nil {
-        	return nil
+		return nil
 	}
-	
+
 	var path string
 	if len(hostFields) == 2 {
-		path,err = url.QueryUnescape(hostFields[1])
+		path, err = url.QueryUnescape(hostFields[1])
 		if err != nil {
-        		return nil
+			return nil
 		}
 	}
 

@@ -43,7 +43,16 @@ the credential.helper config sequence is important, git will match against it un
 
 so organization specific token should goes first.
 
+If a system-level config already defines a helper (for example,
+`osxkeychain` on macOS), reset the inherited helper list before adding scoped
+and fallback helpers. An empty `helper` resets every helper seen before it, so
+its position is significant.
+
 ```ini
+# reset inherited helpers before adding the ordered helper list
+[credential]
+	helper =
+
 # organization specific token
 [credential "https://github.com/your-org/"]
 	helper = readonly --file ~/.git-credentials-org
@@ -79,6 +88,10 @@ you can also use personal and org tokens in one file:
 the config:
 
 ```ini
+# reset inherited helpers before adding the GitHub-specific helper
+[credential]
+	helper =
+
 # github specific token
 [credential "https://github.com/"]
 	helper = readonly --file ~/.git-credentials-org
