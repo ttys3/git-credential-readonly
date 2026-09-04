@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Match multi-level credential path scopes only at slash boundaries, preventing
+  similarly prefixed groups or repositories from receiving the wrong token.
+- Match Git's credential URL parsing and decoding behavior, including literal
+  plus signs, single-pass percent decoding, and query or fragment boundaries.
+- Keep passwords and malformed credential lines out of debug logs, and set
+  debug log file permissions to `0600` on POSIX systems.
+
 ## [1.1.2] - 2026-09-03
 
 ### Fixed
