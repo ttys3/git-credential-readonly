@@ -29,17 +29,112 @@ without being written to the personal store at `~/.git-credentials`.
 go install github.com/ttys3/git-credential-readonly@latest
 ```
 
-The helper supports these actions:
+The helper supports Git's credential actions and an explicit management UI:
 
 ```text
-git-credential-readonly <get|store|erase>
+git-credential-readonly <get|store|erase|manage|tui>
 ```
+
+Git can call `get` as usual. The `store` and `erase` actions remain no-ops so
+Git can never mutate credentials implicitly; only an interactive user in the
+management UI can add, edit, or delete an entry.
 
 For a single default credential file, configure it as follows:
 
 ```shell
 git config --global credential.helper readonly
 ```
+
+## Manage credentials with the TUI
+
+Run the interactive manager with:
+
+```shell
+git-credential-readonly manage
+```
+
+The TUI is built with the actively maintained
+[Bubble Tea](https://github.com/charmbracelet/bubbletea) framework and its
+official [Bubbles](https://github.com/charmbracelet/bubbles) components. Use
+the arrow keys or `j`/`k` to select an entry, <kbd>Enter</kbd> to edit it, and
+`/` to filter a long list. `tui` is an alias for `manage`.
+
+The manager provides two storage backends:
+
+| Backend | Secret storage | Notes |
+| --- | --- | --- |
+| System keyring (recommended) | macOS Keychain, Linux/BSD Secret Service, or Windows Credential Manager | The password or token never appears in the on-disk index. |
+| Credential file | The selected `--file` in standard `git-credential-store` URL format | Preserved for complete compatibility with existing installations. |
+
+New credentials are entered as separate protocol, host, path, username, and
+password/token fields. The manager validates every field and performs the URL
+encoding, so characters such as `@`, `:`, `/`, `+`, `?`, and `#` in a token do
+not corrupt the credential URL. Passwords and tokens are masked, omitted from
+the list and confirmation screens, and never written to the debug log. When
+editing an entry, leave the password/token field empty to retain its current
+value.
+
+Deleting an entry requires a separate confirmation. Credential-file updates
+preserve unrecognized lines, reject concurrent changes, place specific paths
+before broader scopes, and replace the file atomically with mode `0600` on
+POSIX systems. Writes use Git's temporary `<file>.lock` convention and remove
+the lock by atomically renaming it into place, following Git's
+[official lockfile protocol](https://github.com/git/git/blob/v2.55.0/lockfile.h),
+so the file remains interoperable with `git credential-store`.
+
+### Use the system keyring for Git lookups
+
+The default lookup backend remains `file`, so upgrading does not change any
+existing Git configuration. After adding credentials to the system keyring,
+opt in with `--backend keyring`, or use `auto` to check the keyring first and
+then fall back to the configured credential file:
+
+```ini
+[credential]
+	helper =
+	helper = readonly --backend auto
+	useHttpPath = true
+```
+
+Use a URL-specific credential section instead if only selected hosts should
+send paths to helpers. See
+[`credential.useHttpPath`](https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-credentialuseHttpPath)
+and the ordering guidance below. For safety, the keyring backend never returns
+a path-scoped secret when Git omits the request path; enable `useHttpPath`, or
+add an intentionally host-wide entry with an empty path.
+
+The keyring backend uses
+[`zalando/go-keyring`](https://github.com/zalando/go-keyring). On Linux and BSD,
+a [Secret Service](https://specifications.freedesktop.org/secret-service-spec/latest/)
+provider such as GNOME Keyring and a working D-Bus session must be available.
+This is normally already true in a desktop login session; headless sessions
+may need explicit setup. The `auto` backend can still fall back to the file if
+the keyring cannot be reached.
+
+Because the native keyring API cannot enumerate application secrets, the
+manager keeps a versioned metadata index in the operating system's user config
+directory, normally:
+
+```text
+~/.config/git-credential-readonly/keyring-index.json
+```
+
+The index contains only opaque IDs plus protocol, host, path, and username; it
+never contains passwords or tokens and is written with mode `0600` on POSIX.
+Each protected keyring payload also contains its own scope metadata, which is
+verified against the index again before a credential is returned. Use
+`--keyring-index <path>` only when a non-default metadata location is needed.
+Keyring mutations are serialized with an empty `.transaction-lock` sidecar;
+that advisory lock contains no credential data.
+Edits create a new opaque keyring item before atomically switching the index;
+old items remain in a metadata-only pending-cleanup list until they are deleted
+from the keyring. A normal edit therefore never removes the old item before the
+replacement is indexed, and interrupted cleanup is retried by the next keyring
+change.
+
+The TUI never migrates or deletes plaintext credentials automatically. Add and
+verify the secure entry first, then explicitly delete the old file entry if
+you want to complete a migration.
 
 ## Multiple credentials and inherited helpers
 
@@ -142,6 +237,9 @@ usernames and tokens, and restrict their permissions:
 chmod 600 ~/.git-credentials ~/.git-credentials-work
 ```
 
+The TUI writes this exact format when the Credential file backend is selected,
+so files remain usable by Git's built-in `credential-store` helper.
+
 ### Troubleshooting
 
 To see which helper Git actually executes without allowing an interactive
@@ -178,6 +276,7 @@ git config --show-origin --show-scope \
 - [Git credential storage](https://git-scm.com/book/en/v2/Git-Tools-Credential-Storage#_a_custom_credential_cache)
 - [`git credential` input/output format](https://git-scm.com/docs/git-credential#_inputoutput_format)
 - [`git-credential-store` storage and lookup behavior](https://git-scm.com/docs/git-credential-store#_storage_format)
+- [Git's atomic lockfile protocol](https://github.com/git/git/blob/v2.55.0/lockfile.h)
 - [`credential.helper` configuration](https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-credentialhelper)
 - [`credential.useHttpPath` configuration](https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-credentialuseHttpPath)
 - [Git credential-context matching](https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-CREDENTIALCONTEXTS)

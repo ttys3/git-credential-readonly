@@ -21,10 +21,14 @@ func main() {
 	var credFile string
 	var logFile string
 	var debug bool
+	var backend string
+	var keyringIndex string
 
 	flag.StringVar(&credFile, "file", defaultCredentialFile, "use given file instead of the default credential file")
 	flag.StringVar(&logFile, "log", defaultLogFile, "log file path, used only when debug mode is enabled")
 	flag.BoolVar(&debug, "debug", false, "enable debug mode and write log to "+defaultLogFile)
+	flag.StringVar(&backend, "backend", string(fileBackend), "credential lookup backend: file, keyring, or auto")
+	flag.StringVar(&keyringIndex, "keyring-index", "", "keyring metadata index path (defaults to the user config directory)")
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -62,19 +66,91 @@ func main() {
 			log.Fatalf("get stdin failed, err=%v", err)
 		}
 		logCredentialMetadata("get request", req)
-		credential := getCredential(req, credFile)
+		credential, err := lookupCredential(req, backend, credFile, keyringIndex)
+		if err != nil {
+			log.Printf("credential lookup failed: %v", err)
+			os.Exit(1)
+		}
 		if credential == nil {
 			// credential not found
 			os.Exit(1)
 		}
 		logCredentialMetadata("get credential success", credential)
 		fmt.Printf("username=%s\npassword=%s\n", credential.username, credential.password)
+	case "manage", "tui":
+		var stores []managedCredentialStore
+		var storeWarnings []error
+
+		credPath, err := expandHomeDir(credFile)
+		if err != nil {
+			storeWarnings = append(storeWarnings, fmt.Errorf("credential file is unavailable: %w", err))
+		} else {
+			stores = append(stores, newFileCredentialStore(credPath))
+		}
+		indexPath, err := resolveKeyringIndexPath(keyringIndex)
+		if err != nil {
+			storeWarnings = append(storeWarnings, fmt.Errorf("system keyring is unavailable: %w", err))
+		} else {
+			// The manager recommends secure storage, so show it before the
+			// compatibility file backend when both are available.
+			stores = append([]managedCredentialStore{newKeyringCredentialStore(indexPath)}, stores...)
+		}
+		if err := runCredentialManager(stores, storeWarnings...); err != nil {
+			fmt.Fprintf(os.Stderr, "credential manager failed: %s\n", safeTerminalText(err.Error()))
+			os.Exit(1)
+		}
 	case "erase", "store":
 		log.Printf("ignore action=%v", action)
 		// noop
 	default:
 		log.Fatalf("unsupported action=%s", action)
 	}
+}
+
+func lookupCredential(request *credential, backend, credFile, keyringIndex string) (*credential, error) {
+	switch backend {
+	case string(fileBackend):
+		credPath, err := expandHomeDir(credFile)
+		if err != nil {
+			return nil, err
+		}
+		return newFileCredentialStore(credPath).Lookup(request)
+	case string(keyringBackend):
+		indexPath, err := resolveKeyringIndexPath(keyringIndex)
+		if err != nil {
+			return nil, err
+		}
+		return newKeyringCredentialStore(indexPath).Lookup(request)
+	case "auto":
+		indexPath, err := resolveKeyringIndexPath(keyringIndex)
+		var value *credential
+		var keyringErr error
+		if err == nil {
+			value, keyringErr = newKeyringCredentialStore(indexPath).Lookup(request)
+		} else {
+			keyringErr = err
+		}
+		if keyringErr == nil && value != nil {
+			return value, nil
+		}
+		if keyringErr != nil {
+			log.Printf("keyring lookup failed; falling back to file: %v", keyringErr)
+		}
+		credPath, err := expandHomeDir(credFile)
+		if err != nil {
+			return nil, err
+		}
+		return newFileCredentialStore(credPath).Lookup(request)
+	default:
+		return nil, fmt.Errorf("unsupported credential backend %q (want file, keyring, or auto)", backend)
+	}
+}
+
+func resolveKeyringIndexPath(path string) (string, error) {
+	if path == "" {
+		return defaultKeyringIndexPath()
+	}
+	return expandHomeDir(path)
 }
 
 type credential struct {
@@ -230,9 +306,10 @@ func parseCredential(line string) *credential {
 		path = trimCredentialURLPath(path)
 	}
 
-	if strings.Contains(username, "\n") || strings.Contains(password, "\n") ||
-		strings.Contains(host, "\n") || strings.Contains(path, "\n") {
-		return nil
+	for _, field := range []string{proto, username, password, host, path} {
+		if validateCredentialText("credential field", field, true) != nil {
+			return nil
+		}
 	}
 
 	return &credential{
@@ -308,36 +385,15 @@ func hexValue(value byte) (byte, bool) {
 func getCredential(req *credential, credFile string) *credential {
 	credPath, err := expandHomeDir(credFile)
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	file, err := os.Open(credPath)
-	if err != nil {
-		// credential file not found or other error
+		log.Printf("expand credential file path: %v", err)
 		return nil
 	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	lineNumber := 0
-	for scanner.Scan() {
-		lineNumber++
-		line := scanner.Text()
-		cred := parseCredential(line)
-		if cred == nil {
-			log.Printf("ignore malformed credential at line %d", lineNumber)
-			continue
-		}
-		if cred.match(req) {
-			return cred
-		}
+	value, err := newFileCredentialStore(credPath).Lookup(req)
+	if err != nil {
+		log.Printf("read credential file: %v", err)
+		return nil
 	}
-
-	if err := scanner.Err(); err != nil {
-		log.Fatal(err)
-	}
-
-	return nil
+	return value
 }
 
 func expandHomeDir(path string) (string, error) {
