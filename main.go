@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/url"
 	"os"
 	"os/user"
 	"strings"
@@ -36,10 +35,11 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		logOut, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModePerm)
+		logOut, err := openDebugLog(logFile)
 		if err != nil {
 			log.Fatal(err)
 		}
+		defer logOut.Close()
 		log.SetOutput(logOut)
 	} else {
 		log.SetOutput(io.Discard)
@@ -61,13 +61,13 @@ func main() {
 		if err != nil {
 			log.Fatalf("get stdin failed, err=%v", err)
 		}
-		log.Printf("get req success: %#v", req)
+		logCredentialMetadata("get request", req)
 		credential := getCredential(req, credFile)
 		if credential == nil {
 			// credential not found
 			os.Exit(1)
 		}
-		log.Printf("get credential success: %#v", credential)
+		logCredentialMetadata("get credential success", credential)
 		fmt.Printf("username=%s\npassword=%s\n", credential.username, credential.password)
 	case "erase", "store":
 		log.Printf("ignore action=%v", action)
@@ -83,6 +83,23 @@ type credential struct {
 	password string
 	host     string
 	path     string
+}
+
+func openDebugLog(path string) (*os.File, error) {
+	logOut, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := logOut.Chmod(0o600); err != nil {
+		logOut.Close()
+		return nil, err
+	}
+	return logOut, nil
+}
+
+func logCredentialMetadata(event string, credential *credential) {
+	log.Printf("%s: protocol=%q,host=%q,path=%q,username=%q",
+		event, credential.protocol, credential.host, credential.path, credential.username)
 }
 
 func (c *credential) match(req *credential) bool {
@@ -102,24 +119,51 @@ func (c *credential) match(req *credential) bool {
 	if req.path != "" {
 		pathMatch := matchCredentialPath(c.path, req.path)
 		match = match && pathMatch
-		log.Printf("match path: req.path=%v,config.path=%v,result=%v",
+		log.Printf("match path: req.path=%q,config.path=%q,result=%v",
 			req.path, c.path, match)
 	}
 	return match
 }
 
 func matchCredentialPath(configPath, requestPath string) bool {
+	// Keep Git's exact-match behavior, including the encoded-root path "/",
+	// before normalizing optional trailing separators for scope matching.
+	if configPath != "" && configPath == requestPath {
+		return true
+	}
+
 	configPath = strings.TrimRight(configPath, "/")
 	requestPath = strings.TrimRight(requestPath, "/")
 
-	// Preserve the standard credential-store behavior for repository-specific
-	// entries before trying the owner/organization shorthand supported here.
+	if configPath == "" || requestPath == "" {
+		return false
+	}
+
 	if configPath == requestPath {
 		return true
 	}
 
-	requestOwner, _, hasSeparator := strings.Cut(requestPath, "/")
-	return hasSeparator && requestOwner != "" && configPath == requestOwner
+	// Scope matching is an extension to credential-store's exact path match.
+	// Refuse ambiguous dot segments so a path cannot escape a matched scope.
+	if hasDotPathSegment(configPath) || hasDotPathSegment(requestPath) {
+		return false
+	}
+
+	return len(requestPath) > len(configPath) &&
+		strings.HasPrefix(requestPath, configPath) &&
+		requestPath[len(configPath)] == '/'
+}
+
+func hasDotPathSegment(path string) bool {
+	// Git's decoder may preserve escapes before a literal ':', while the URL
+	// consumer can still normalize them. Use a fully decoded safety view so an
+	// encoded dot or slash cannot hide a path traversal from scope matching.
+	for _, segment := range strings.Split(decodePercentEscapes(path), "/") {
+		if segment == "." || segment == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func parseGitCredentialRequest(r io.Reader) (*credential, error) {
@@ -157,52 +201,38 @@ func parseGitCredentialRequest(r io.Reader) (*credential, error) {
 }
 
 func parseCredential(line string) *credential {
-	fields := strings.SplitN(line, "://", 2)
-	if len(fields) != 2 {
+	protoEnd := strings.Index(line, "://")
+	if protoEnd <= 0 {
 		// malformed line, ignore
 		return nil
 	}
-	proto := fields[0]
-	rest := fields[1]
+	proto := line[:protoEnd]
+	rest := line[protoEnd+3:]
 
-	fields = strings.SplitN(rest, "@", 2)
-	if len(fields) != 2 {
+	hostEnd := strings.IndexAny(rest, "/?#")
+	if hostEnd < 0 {
+		hostEnd = len(rest)
+	}
+	at := strings.IndexByte(rest, '@')
+	colon := strings.IndexByte(rest, ':')
+	if at < 0 || hostEnd <= at || colon < 0 || at <= colon {
 		// malformed line, ignore
 		return nil
 	}
-
-	auth := fields[0]
-	credFields := strings.SplitN(auth, ":", 2)
-	if len(credFields) != 2 {
-		// malformed line, ignore
-		return nil
-	}
-	username, err := url.QueryUnescape(credFields[0])
-	if err != nil {
-		return nil
-	}
-	password, err := url.QueryUnescape(credFields[1])
-	if err != nil {
-		return nil
-	}
-
-	hostAndPath := fields[1]
-	hostFields := strings.SplitN(hostAndPath, "/", 2)
-	if len(hostFields) != 1 && len(hostFields) != 2 {
-		// malformed line, ignore
-		return nil
-	}
-	host, err := url.QueryUnescape(hostFields[0])
-	if err != nil {
-		return nil
-	}
+	username := decodeCredentialURLComponent(rest[:colon])
+	password := decodeCredentialURLComponent(rest[colon+1 : at])
+	host := decodeCredentialURLComponent(rest[at+1 : hostEnd])
 
 	var path string
-	if len(hostFields) == 2 {
-		path, err = url.QueryUnescape(hostFields[1])
-		if err != nil {
-			return nil
-		}
+	if hostEnd < len(rest) {
+		rawPath := strings.TrimLeft(rest[hostEnd:], "/")
+		path = decodeCredentialURLComponent(rawPath)
+		path = trimCredentialURLPath(path)
+	}
+
+	if strings.Contains(username, "\n") || strings.Contains(password, "\n") ||
+		strings.Contains(host, "\n") || strings.Contains(path, "\n") {
+		return nil
 	}
 
 	return &credential{
@@ -211,6 +241,67 @@ func parseCredential(line string) *credential {
 		password: password,
 		host:     host,
 		path:     path,
+	}
+}
+
+func trimCredentialURLPath(path string) string {
+	trimmed := strings.TrimRight(path, "/")
+	if path != "" && trimmed == "" {
+		return "/"
+	}
+	return trimmed
+}
+
+// decodeCredentialURLComponent follows Git's url_decode_mem: a prefix before
+// the first literal ':' is preserved as a possible URL scheme; the remainder
+// decodes valid, non-NUL percent escapes exactly once and leaves '+' and
+// malformed escapes unchanged.
+func decodeCredentialURLComponent(value string) string {
+	colon := strings.IndexByte(value, ':')
+	if colon <= 0 {
+		return decodePercentEscapes(value)
+	}
+
+	var decoded strings.Builder
+	decoded.Grow(len(value))
+	decoded.WriteString(value[:colon])
+	decoded.WriteString(decodePercentEscapes(value[colon:]))
+	return decoded.String()
+}
+
+func decodePercentEscapes(value string) string {
+	var decoded strings.Builder
+	decoded.Grow(len(value))
+
+	for i := 0; i < len(value); i++ {
+		if value[i] == '%' && i+2 < len(value) {
+			high, highOK := hexValue(value[i+1])
+			low, lowOK := hexValue(value[i+2])
+			if highOK && lowOK {
+				unescaped := high<<4 | low
+				if unescaped != 0 {
+					decoded.WriteByte(unescaped)
+					i += 2
+					continue
+				}
+			}
+		}
+		decoded.WriteByte(value[i])
+	}
+
+	return decoded.String()
+}
+
+func hexValue(value byte) (byte, bool) {
+	switch {
+	case value >= '0' && value <= '9':
+		return value - '0', true
+	case value >= 'a' && value <= 'f':
+		return value - 'a' + 10, true
+	case value >= 'A' && value <= 'F':
+		return value - 'A' + 10, true
+	default:
+		return 0, false
 	}
 }
 
@@ -228,11 +319,13 @@ func getCredential(req *credential, credFile string) *credential {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	lineNumber := 0
 	for scanner.Scan() {
+		lineNumber++
 		line := scanner.Text()
 		cred := parseCredential(line)
 		if cred == nil {
-			log.Printf("err malformed credential line: %s", line)
+			log.Printf("ignore malformed credential at line %d", lineNumber)
 			continue
 		}
 		if cred.match(req) {

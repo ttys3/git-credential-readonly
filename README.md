@@ -88,6 +88,10 @@ See the complete, sanitized [`examples/gitconfig`](examples/gitconfig) file:
 [credential "https://git.example.com/"]
 	helper = readonly --file ~/.git-credentials-work
 
+[credential "https://gitlab.example.com/"]
+	helper = readonly --file ~/.git-credentials-work
+	useHttpPath = true
+
 [credential]
 	helper = readonly
 ```
@@ -97,15 +101,26 @@ file names as needed.
 
 ### Credential file examples
 
-When `useHttpPath = true`, include a GitHub account or organization path in
-each credential URL. An owner-only entry matches every repository belonging to
-that owner, while a full repository path matches only that repository.
+Git removes the HTTP(S) path before invoking external helpers unless
+[`credential.useHttpPath`](https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-credentialuseHttpPath)
+is enabled. Git's built-in `credential-store` then compares a supplied path
+exactly. This helper intentionally extends that behavior with slash-delimited
+path scopes: `group/subgroup` matches both itself and descendants such as
+`group/subgroup/project.git`, but it does not match `group/subgroup-backup`.
+A trailing slash on a credential path is optional. Non-exact scope matches are
+rejected when either path contains a `.` or `..` segment, including a
+percent-encoded form that remains after Git's URL decoding.
+
+Credential lines are checked from top to bottom, like `credential-store`, and
+the first match wins. Put full repository paths before subgroup paths, and put
+subgroup paths before broader organization or account paths.
 
 `~/.git-credentials-work`:
 
 ```text
-https://example-user:organization-token@github.com/example-org
 https://example-user:repository-token@github.com/example-org/private-repository.git
+https://example-user:organization-token@github.com/example-org
+https://example-user:subgroup-token@gitlab.example.com/group/subgroup
 https://example-user:work-token@git.example.com
 ```
 
@@ -117,8 +132,11 @@ The default personal file may contain:
 https://example-user:personal-token@github.com/example-user
 ```
 
-Credential files contain plaintext secrets. Never commit them, percent-encode
-special characters in usernames and tokens, and restrict their permissions:
+Credential files use the official
+[`git-credential-store` storage format](https://git-scm.com/docs/git-credential-store#_storage_format):
+one credential URL per line, without comments or blank lines. They contain
+plaintext secrets. Never commit them, percent-encode special characters in
+usernames and tokens, and restrict their permissions:
 
 ```shell
 chmod 600 ~/.git-credentials ~/.git-credentials-work
@@ -158,5 +176,12 @@ git config --show-origin --show-scope \
 ## Documentation
 
 - [Git credential storage](https://git-scm.com/book/en/v2/Git-Tools-Credential-Storage#_a_custom_credential_cache)
+- [`git credential` input/output format](https://git-scm.com/docs/git-credential#_inputoutput_format)
+- [`git-credential-store` storage and lookup behavior](https://git-scm.com/docs/git-credential-store#_storage_format)
 - [`credential.helper` configuration](https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-credentialhelper)
 - [`credential.useHttpPath` configuration](https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-credentialuseHttpPath)
+- [Git credential-context matching](https://git-scm.com/docs/gitcredentials#Documentation/gitcredentials.txt-CREDENTIALCONTEXTS)
+- [Git's exact credential field matcher](https://github.com/git/git/blob/v2.55.0/credential.c#L81-L92)
+- [Git's `credential-store` lookup loop](https://github.com/git/git/blob/v2.55.0/builtin/credential-store.c#L13-L47)
+- [Git's credential URL parser](https://github.com/git/git/blob/v2.55.0/credential.c#L585-L653)
+- [Git's credential URL decoder](https://github.com/git/git/blob/v2.55.0/url.c#L44-L102)

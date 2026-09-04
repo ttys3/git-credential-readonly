@@ -17,6 +17,11 @@
 [credential "https://git.example.com/"]
 	helper = readonly --file ~/.git-credentials-work
 
+# Optional GitLab host demonstrating a multi-level group credential scope.
+[credential "https://gitlab.example.com/"]
+	helper = readonly --file ~/.git-credentials-work
+	useHttpPath = true
+
 # General personal credential fallback. Keep this after scoped helpers.
 [credential]
 	helper = readonly
