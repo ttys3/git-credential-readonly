@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-09-04
+
+### Changed
+
+- Validate GoReleaser snapshot builds on pull requests while publishing releases
+  only from tags, using Go 1.27.1 and GoReleaser Action v7.
+
 ### Fixed
 
 - Match multi-level credential path scopes only at slash boundaries, preventing
@@ -24,5 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Match full repository paths while retaining owner and organization shorthand matching.
 - Document the required ordering when an empty `credential.helper` resets inherited helpers.
 
-[Unreleased]: https://github.com/ttys3/git-credential-readonly/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/ttys3/git-credential-readonly/compare/v1.1.3...HEAD
+[1.1.3]: https://github.com/ttys3/git-credential-readonly/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/ttys3/git-credential-readonly/compare/v1.1.1...v1.1.2
