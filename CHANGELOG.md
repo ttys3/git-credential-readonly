@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add a Bubble Tea-based credential management TUI with structured, validated
+  fields for listing, creating, editing, and deleting credentials.
+- Add opt-in storage through macOS Keychain, Linux/BSD Secret Service, and
+  Windows Credential Manager, with explicit `keyring` and `auto` lookup modes.
+
+### Changed
+
+- Preserve the existing credential-file backend while making TUI writes
+  atomic, concurrency-aware, scope-ordered, and permission-restricted.
+- Require Go 1.25 or newer for the Bubble Tea v2 interface.
+
+### Security
+
+- Keep secrets out of TUI lists, confirmation screens, and the on-disk keyring
+  index; verify protected payload metadata before returning a credential.
+- Make keyring edits and deletions interruption-safe with atomic index switches
+  and verified cleanup of obsolete protected items.
+- Generate credential URLs from validated structured fields instead of asking
+  users to manually encode usernames, tokens, hosts, and paths.
+
 ## [1.1.3] - 2026-09-04
 
 ### Changed

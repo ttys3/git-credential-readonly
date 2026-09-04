@@ -142,6 +142,32 @@ func TestGetCredential(t *testing.T) {
 	}
 }
 
+func TestLookupCredentialAutoFallsBackToFile(t *testing.T) {
+	credFile := writeCredentialFile(t, "https://user:file-secret@example.com/org/repository.git")
+	missingIndex := filepath.Join(t.TempDir(), "missing-keyring-index.json")
+	request := &credential{
+		protocol: "https",
+		host:     "example.com",
+		path:     "org/repository.git",
+		username: "user",
+	}
+
+	got, err := lookupCredential(request, "auto", credFile, missingIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.password != "file-secret" {
+		t.Fatalf("auto lookup = %+v, want file fallback", got)
+	}
+}
+
+func TestLookupCredentialRejectsUnsupportedBackend(t *testing.T) {
+	_, err := lookupCredential(&credential{}, "unknown", "unused", "unused")
+	if err == nil || !strings.Contains(err.Error(), "unsupported credential backend") {
+		t.Fatalf("error = %v, want unsupported backend", err)
+	}
+}
+
 func TestGetCredentialNestedPathScopes(t *testing.T) {
 	credFile := writeCredentialFile(t,
 		"https://USERNAME:TOKEN1@gitlab.com/group/subgroup1/project.git",
@@ -491,9 +517,15 @@ func TestParseCredentialMatchesGitPercentDecoding(t *testing.T) {
 	}
 }
 
-func TestParseCredentialRejectsEncodedNewline(t *testing.T) {
-	if got := parseCredential("https://user:token%0Asecret@gitlab.com/group/repo.git"); got != nil {
-		t.Fatalf("unexpected credential: %+v", got)
+func TestParseCredentialRejectsEncodedControls(t *testing.T) {
+	for _, line := range []string{
+		"https://user:token%0Asecret@gitlab.com/group/repo.git",
+		"https://user%0Dpassword=attacker:token@gitlab.com/group/repo.git",
+		"https://user:token%1B%5B31m@gitlab.com/group/repo.git",
+	} {
+		if got := parseCredential(line); got != nil {
+			t.Fatalf("unexpected credential for %q: %+v", line, got)
+		}
 	}
 }
 
